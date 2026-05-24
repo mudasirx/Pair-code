@@ -92,52 +92,62 @@ Uses Baileys with a pairing code (no QR scan). The bot needs to be linked
 once from a real WhatsApp account, after which it stays linked indefinitely
 (until you unlink it from WhatsApp → Linked Devices).
 
+The recommended flow is to **pair directly on Render** — no local pairing
+needed. The Render Blueprint ships with a 1 GB persistent disk mounted at
+`/var/data`, so the credentials produced by the first-boot pairing survive
+restarts and redeploys.
+
 ### Configuration
 
 | Variable | Description |
 |---|---|
 | `MYSMSPORTAL_USERNAME` | mysmsportal.com login username |
 | `MYSMSPORTAL_PASSWORD` | mysmsportal.com login password |
-| `WHATSAPP_AUTH_BASE64` | Base64-encoded zip of `auth_info_baileys/` produced by `npm run pair`. Required on Render. Not needed locally. |
+| `WHATSAPP_PHONE_NUMBER` | Phone number to link, digits only with country code (e.g. `923001234567`). Used only on first boot to request the pairing code. |
 | `WHATSAPP_TARGET` | Optional. Phone number (digits only) or full JID (`...@s.whatsapp.net` / `...@g.us`) to send messages to. Defaults to the linked account itself. |
+| `AUTH_DIR` | Where Baileys stores credentials. Defaults to `/var/data/auth_info_baileys` on Render (persistent disk). |
+| `WHATSAPP_AUTH_BASE64` | Optional fallback. If set and `AUTH_DIR` is empty, the bot unpacks this base64 payload into `AUTH_DIR` on boot. Useful if you can't use a disk. |
 | `POLL_INTERVAL_SECONDS` | Optional, default `30` |
 | `STARTUP_NOTIFY` | Optional, send a "bot started" message on launch (default `true`) |
 
-### Step 1 — Pair locally
+### Pair directly on Render (recommended)
+
+1. Push this repo to GitHub.
+2. Create the Render Blueprint (`New → Blueprint`).
+3. On the **`mysmsportal-whatsapp-bot`** service, set the env vars from the
+   table above — at minimum `MYSMSPORTAL_USERNAME`, `MYSMSPORTAL_PASSWORD`,
+   and `WHATSAPP_PHONE_NUMBER`.
+4. Deploy. Open the worker's **Logs** tab and wait for a banner like:
+
+   ```
+   ======================================================
+     WhatsApp pairing code:  ABCD-1234
+   ======================================================
+   ```
+5. On your phone: **WhatsApp → Settings → Linked Devices → Link a Device →
+   "Link with phone number instead"** and enter the 8-digit code. Code is
+   valid for ~60 seconds — if it expires just restart the worker to get a
+   fresh one.
+6. The bot finishes linking, saves the credentials to `/var/data`, and
+   starts polling. From now on every restart reuses the saved auth, so you
+   can clear `WHATSAPP_PHONE_NUMBER` if you want (optional).
+
+### Pair locally (optional alternative)
+
+If you prefer pairing on your own machine first:
 
 ```bash
 npm install
-npm run pair        # asks for your WhatsApp phone number, prints an 8-digit code
+npm run pair                # prompts for phone, prints the pairing code
+npm run start:portal-wa     # smoke-test polling locally with portal env vars set
+npm run export-auth         # produces whatsapp_auth.base64.txt
 ```
 
-On your phone: **WhatsApp → Settings → Linked Devices → Link a Device →
-"Link with phone number instead"** and enter the code. Once linked the script
-exits and leaves the credentials in `./auth_info_baileys/`.
+Then set `WHATSAPP_AUTH_BASE64` on Render to the contents of that file. On
+first boot the bot will unpack it into `AUTH_DIR` and skip pairing.
 
-### Step 2 — Run locally (optional smoke test)
-
-```bash
-cp .env.example .env   # fill in MYSMSPORTAL_USERNAME / MYSMSPORTAL_PASSWORD
-set -a && source .env && set +a
-npm run start:portal-wa
-```
-
-### Step 3 — Package auth for Render
-
-Render workers don't have local disk that survives restarts, so we ship the
-auth state via env var:
-
-```bash
-npm run export-auth
-# writes whatsapp_auth.base64.txt  (one long string)
-```
-
-Copy the contents of `whatsapp_auth.base64.txt` and set it as the
-`WHATSAPP_AUTH_BASE64` env var on the Render worker. The bot will unpack it
-on startup.
-
-> **Heads up:** that base64 string contains your WhatsApp session keys.
-> Treat it like a password. Never commit it.
+> **Heads up:** the base64 payload contains your WhatsApp session keys —
+> treat it like a password. Never commit it.
 
 ---
 

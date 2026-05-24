@@ -53,15 +53,23 @@ services:
     branch: main
     buildCommand: npm ci --omit=dev
     startCommand: node whatsapp_bot.js
+    disk:
+      name: whatsapp-auth
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: MYSMSPORTAL_USERNAME
         sync: false
       - key: MYSMSPORTAL_PASSWORD
         sync: false
-      - key: WHATSAPP_AUTH_BASE64
+      - key: WHATSAPP_PHONE_NUMBER
         sync: false
       - key: WHATSAPP_TARGET
         sync: false
+      - key: WHATSAPP_AUTH_BASE64
+        sync: false
+      - key: AUTH_DIR
+        value: /var/data/auth_info_baileys
       - key: POLL_INTERVAL_SECONDS
         value: "30"
       - key: STARTUP_NOTIFY
