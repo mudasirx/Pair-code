@@ -5,3 +5,15 @@ venv/
 .env
 *.log
 .DS_Store
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# WhatsApp / Baileys state — never commit
+auth_info_baileys/
+whatsapp_auth.zip
+whatsapp_auth.base64.txt
+.whatsapp_auth.zip
