@@ -1,4 +1,26 @@
 services:
+  # WhatsApp pairing website (Node)
+  - type: web
+    name: whatsapp-bot-pairing
+    env: node
+    plan: starter
+    region: oregon
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 20.18.0
+      - key: SESSIONS_DIR
+        value: /var/data/sessions
+      - key: LOG_LEVEL
+        value: info
+    disk:
+      name: sessions
+      mountPath: /var/data
+      sizeGB: 1
+
+  # mysmsportal -> Telegram polling worker (Python)
   - type: worker
     name: mysmsportal-telegram-bot
     runtime: python

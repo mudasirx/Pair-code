@@ -1,22 +1,33 @@
 {
-  "name": "mysmsportal-pair-code",
-  "version": "1.0.0",
-  "description": "mysmsportal -> WhatsApp bot using Baileys pairing-code link",
-  "main": "whatsapp_bot.js",
+  "name": "pair-code",
+  "version": "0.2.0",
+  "description": "WhatsApp pairing site + mysmsportal -> WhatsApp/Telegram forwarders, all on Baileys.",
+  "main": "src/server.js",
+  "type": "commonjs",
   "private": true,
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "start": "node whatsapp_bot.js",
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "lint": "eslint \"src/**/*.js\"",
+    "start:portal-wa": "node whatsapp_bot.js",
     "pair": "node pair.js",
     "export-auth": "node export_auth.js"
   },
-  "engines": {
-    "node": ">=22"
-  },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.7.9",
+    "@hapi/boom": "^10.0.1",
+    "@whiskeysockets/baileys": "^6.7.18",
     "axios": "^1.7.7",
     "cheerio": "^1.0.0",
-    "pino": "^9.5.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "pino": "^9.6.0",
+    "qrcode": "^1.5.4",
     "tough-cookie": "^5.0.0"
+  },
+  "devDependencies": {
+    "eslint": "^9.18.0"
   }
 }

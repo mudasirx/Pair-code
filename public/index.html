@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Link your WhatsApp</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header>
+        <h1>Link your WhatsApp</h1>
+        <p class="lede">
+          Connect your number to the bot. Pick the method that's easier for you.
+        </p>
+      </header>
+
+      <section class="tabs" role="tablist">
+        <button
+          id="tab-qr"
+          class="tab active"
+          role="tab"
+          aria-selected="true"
+          data-target="panel-qr"
+        >
+          Scan QR code
+        </button>
+        <button
+          id="tab-pair"
+          class="tab"
+          role="tab"
+          aria-selected="false"
+          data-target="panel-pair"
+        >
+          Pair with code
+        </button>
+      </section>
+
+      <section
+        id="panel-qr"
+        class="panel active"
+        role="tabpanel"
+        aria-labelledby="tab-qr"
+      >
+        <ol class="steps">
+          <li>Open WhatsApp on your phone.</li>
+          <li>
+            Tap <b>Settings</b> &rarr; <b>Linked devices</b> &rarr;
+            <b>Link a device</b>.
+          </li>
+          <li>Point your phone at the QR code below.</li>
+        </ol>
+        <div class="qr-wrap">
+          <div id="qr" class="qr placeholder">
+            <span>Preparing QR…</span>
+          </div>
+        </div>
+      </section>
+
+      <section
+        id="panel-pair"
+        class="panel"
+        role="tabpanel"
+        aria-labelledby="tab-pair"
+        hidden
+      >
+        <ol class="steps">
+          <li>Open WhatsApp on your phone.</li>
+          <li>
+            Tap <b>Settings</b> &rarr; <b>Linked devices</b> &rarr;
+            <b>Link a device</b> &rarr; <b>Link with phone number instead</b>.
+          </li>
+          <li>Enter your WhatsApp number with country code (digits only).</li>
+        </ol>
+        <form id="pair-form" class="pair-form" autocomplete="off">
+          <label for="phone">Phone number</label>
+          <input
+            id="phone"
+            name="phone"
+            type="tel"
+            inputmode="numeric"
+            placeholder="e.g. 923001234567"
+            required
+          />
+          <button type="submit" id="pair-submit">Get pairing code</button>
+        </form>
+        <div id="pair-code" class="pair-code" hidden>
+          <p class="pair-code-label">Enter this code on your phone:</p>
+          <p id="pair-code-value" class="pair-code-value">----&ndash;----</p>
+          <p class="muted">The code expires in about 60 seconds.</p>
+        </div>
+      </section>
+
+      <section id="status" class="status">
+        <div class="status-dot" data-status="idle"></div>
+        <div class="status-text" id="status-text">Initialising…</div>
+      </section>
+
+      <section id="success" class="success" hidden>
+        <h2>Connected</h2>
+        <p>
+          Your WhatsApp is linked as <b id="success-user">unknown</b>. You can
+          close this tab — the bot will keep running.
+        </p>
+        <button id="logout" class="secondary">Unlink this device</button>
+      </section>
+
+      <footer>
+        <p class="muted">
+          We never see your messages outside the bot. Your session is stored on
+          the server only so the bot can stay logged in.
+        </p>
+      </footer>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
