@@ -1,17 +1,21 @@
 # Pair-code
 
-This repo hosts two independent services that share a `.env` file and a single
+This repo bundles three small services that share a `.env` file and a single
 Render blueprint:
 
-1. **WhatsApp pairing website** (`src/`, `public/`) — Node.js + Baileys site
-   that lets each visitor link their own WhatsApp number using a QR scan or an
-   8-digit pair code. Foundation for a future WhatsApp bot.
-2. **mysmsportal → Telegram bot** (`bot.py`) — Python worker that logs into
+1. **WhatsApp pairing website** (`src/`, `public/`) — Node + Express + Baileys
+   site that lets each visitor link their own WhatsApp number using a QR scan
+   or an 8-digit pair code. Useful as the linking surface for any future
+   WhatsApp bot logic.
+2. **mysmsportal → Telegram worker** (`bot.py`) — Python worker that logs into
    [mysmsportal.com](http://mysmsportal.com), polls the SMS Test Numbers page,
    and forwards any new test-results rows to a Telegram chat.
+3. **mysmsportal → WhatsApp worker** (`whatsapp_bot.js`) — Node worker that
+   does the same job as `bot.py`, but sends the alerts over WhatsApp instead
+   of Telegram. Uses Baileys with a pre-paired session.
 
-The two services are deployed as separate Render services from the same
-`render.yaml` blueprint — one `web` (Node) and one `worker` (Python).
+All three services are deployed as separate Render services from the same
+`render.yaml` blueprint: one `web` (Node) and two `worker`s (Python + Node).
 
 ---
 
@@ -26,12 +30,10 @@ own isolated WhatsApp session and can link their number using **either**:
 
 ### Stack
 
-- **Node.js 20+**, CommonJS
-- **Express** for the HTTP API
-- **Baileys** (`@whiskeysockets/baileys`) for the WhatsApp Web protocol
-- **Vanilla HTML/CSS/JS** for the frontend — no framework, no build step
-- **Server-Sent Events** to push session state to the browser in real time
-- **Multi-file auth state** persisted to disk so sessions survive restarts
+- Node.js 20+, Express, Baileys
+- Vanilla HTML/CSS/JS frontend — no build step
+- Server-Sent Events to push session state to the browser in real time
+- Multi-file auth state persisted to disk
 
 ### Local development
 
@@ -41,19 +43,6 @@ npm install
 npm run dev
 # open http://localhost:3000
 ```
-
-When you open the site:
-
-1. The browser POSTs to `/api/sessions` to create a fresh session ID.
-2. The server boots a Baileys socket for that ID and starts streaming state
-   over `/api/sessions/:id/events` (SSE).
-3. Pick the QR or Pair Code tab and follow the on-screen steps.
-4. Once connected, the bot logic in `src/botHandler.js` runs against incoming
-   messages. Send `/ping` from another phone to test — the bot replies with
-   `pong`.
-
-The session ID is stored in `localStorage` so the same browser keeps reusing
-the same WhatsApp session.
 
 ### API
 
@@ -67,24 +56,15 @@ the same WhatsApp session.
 | POST   | `/api/sessions/:id/pair`     | Request an 8-digit pair code for a number    |
 | POST   | `/api/sessions/:id/logout`   | Log out and wipe the session                 |
 
-### Where the bot logic goes
-
-`src/botHandler.js` exports `handleIncomingMessage({ sessionId, sock, update })`.
-It is wired into Baileys' `messages.upsert` event for every active session.
-For now it only handles `/ping` and `/start` — drop your own command handlers
-in there.
+The bot logic lives in `src/botHandler.js` and is wired into Baileys'
+`messages.upsert` event for every active session. Add your own command
+handlers there.
 
 ---
 
-## 2. mysmsportal Telegram Bot
-
-A small Python worker that logs into mysmsportal.com, polls the **SMS Test
-Numbers** page every 30 s, and sends any new rows from the test-results table
-(Date / Termination / DDI / CLI / Status) to a Telegram chat.
+## 2. mysmsportal Telegram worker (`bot.py`)
 
 ### Configuration
-
-Set these environment variables (see [`.env.example`](./.env.example)):
 
 | Variable | Description |
 |---|---|
@@ -104,50 +84,103 @@ set -a && source .env && set +a
 python bot.py
 ```
 
-### How it works
+---
 
-On startup the bot logs in, captures the test-results table as the
-"already-seen" baseline (so it does not spam every existing row), and then on
-each poll it compares the current rows against that baseline. New rows are
-sent to Telegram in the order they appeared. If the session expires the client
-transparently logs back in.
+## 3. mysmsportal WhatsApp worker (`whatsapp_bot.js`)
+
+Uses Baileys with a pairing code (no QR scan). The bot needs to be linked
+once from a real WhatsApp account, after which it stays linked indefinitely
+(until you unlink it from WhatsApp → Linked Devices).
+
+### Configuration
+
+| Variable | Description |
+|---|---|
+| `MYSMSPORTAL_USERNAME` | mysmsportal.com login username |
+| `MYSMSPORTAL_PASSWORD` | mysmsportal.com login password |
+| `WHATSAPP_AUTH_BASE64` | Base64-encoded zip of `auth_info_baileys/` produced by `npm run pair`. Required on Render. Not needed locally. |
+| `WHATSAPP_TARGET` | Optional. Phone number (digits only) or full JID (`...@s.whatsapp.net` / `...@g.us`) to send messages to. Defaults to the linked account itself. |
+| `POLL_INTERVAL_SECONDS` | Optional, default `30` |
+| `STARTUP_NOTIFY` | Optional, send a "bot started" message on launch (default `true`) |
+
+### Step 1 — Pair locally
+
+```bash
+npm install
+npm run pair        # asks for your WhatsApp phone number, prints an 8-digit code
+```
+
+On your phone: **WhatsApp → Settings → Linked Devices → Link a Device →
+"Link with phone number instead"** and enter the code. Once linked the script
+exits and leaves the credentials in `./auth_info_baileys/`.
+
+### Step 2 — Run locally (optional smoke test)
+
+```bash
+cp .env.example .env   # fill in MYSMSPORTAL_USERNAME / MYSMSPORTAL_PASSWORD
+set -a && source .env && set +a
+npm run start:portal-wa
+```
+
+### Step 3 — Package auth for Render
+
+Render workers don't have local disk that survives restarts, so we ship the
+auth state via env var:
+
+```bash
+npm run export-auth
+# writes whatsapp_auth.base64.txt  (one long string)
+```
+
+Copy the contents of `whatsapp_auth.base64.txt` and set it as the
+`WHATSAPP_AUTH_BASE64` env var on the Render worker. The bot will unpack it
+on startup.
+
+> **Heads up:** that base64 string contains your WhatsApp session keys.
+> Treat it like a password. Never commit it.
 
 ---
 
 ## Render deployment
 
-[`render.yaml`](./render.yaml) is a Render Blueprint that defines **both**
+[`render.yaml`](./render.yaml) is a Render Blueprint that defines all three
 services:
 
-- A `web` service `whatsapp-bot-pairing` (Node, with a persistent disk at
-  `/var/data` for `SESSIONS_DIR=/var/data/sessions`).
-- A `worker` service `mysmsportal-telegram-bot` (Python).
+- `web` — `whatsapp-bot-pairing` (Node, persistent disk at `/var/data` for
+  `SESSIONS_DIR=/var/data/sessions`).
+- `worker` — `mysmsportal-telegram-bot` (Python).
+- `worker` — `mysmsportal-whatsapp-bot` (Node).
 
 Steps:
 
 1. Push this repo to GitHub.
 2. In Render: **New → Blueprint**, point it at this repo.
-3. Render will create both services. On each service's **Environment** tab,
-   fill in the secrets that have `sync: false`
-   (`MYSMSPORTAL_USERNAME`, `MYSMSPORTAL_PASSWORD`, `TELEGRAM_BOT_TOKEN`,
-   `TELEGRAM_CHAT_ID`).
+3. Render creates the three services. On each service's **Environment** tab,
+   fill in the secrets that have `sync: false`.
 4. Deploy.
 
-> Background workers on Render require a paid plan. If you need a free
-> alternative for the Python worker, you can run `python bot.py` on any
-> always-on box (a small VPS, a Raspberry Pi, etc.) — it has no other
-> infrastructure requirements.
+> Background workers on Render require a paid plan. As a free alternative,
+> the workers run fine on any always-on box (small VPS, Raspberry Pi, etc.).
+
+## How dedupe works (both workers)
+
+On startup each worker logs in, captures the current rows of the test-results
+table as the "already-seen" baseline (so it doesn't spam history), and on each
+subsequent poll compares the new snapshot against that baseline. New rows are
+sent in the order they appeared. If the portal session expires the client
+transparently logs back in.
+
+Dedupe state is in-memory. If a worker restarts, it re-baselines on its first
+poll.
 
 ## Security notes
 
-- Sessions for the WhatsApp pairing site are stored on disk under
-  `SESSIONS_DIR`. Treat that directory like a credentials store — anyone with
-  access to it can impersonate the linked WhatsApp accounts.
+- WhatsApp pairing site sessions live under `SESSIONS_DIR` and the WhatsApp
+  worker's session lives in `auth_info_baileys/`. Treat both like credentials.
+- `WHATSAPP_AUTH_BASE64` contains WhatsApp session keys — never commit it.
 - The `/api/sessions/:id/*` endpoints currently trust the session ID as a
-  bearer token (whoever knows it controls that session). Session IDs are
-  16 random hex chars (~64 bits of entropy), which is fine for the linking
-  flow itself but you may want to add proper auth before exposing this on a
-  shared URL.
+  bearer token. Session IDs are 16 random hex chars; add proper auth before
+  exposing the pairing site on a public URL.
 - Baileys is an **unofficial** WhatsApp Web client. Accounts can be banned by
   WhatsApp at their discretion. For production / commercial use, the WhatsApp
   Cloud API is the official path.

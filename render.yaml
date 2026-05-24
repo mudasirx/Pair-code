@@ -44,3 +44,29 @@ services:
         value: "true"
       - key: PYTHON_VERSION
         value: "3.11.9"
+
+  - type: worker
+    name: mysmsportal-whatsapp-bot
+    runtime: node
+    plan: starter
+    region: oregon
+    branch: main
+    buildCommand: npm ci --omit=dev
+    startCommand: node whatsapp_bot.js
+    envVars:
+      - key: MYSMSPORTAL_USERNAME
+        sync: false
+      - key: MYSMSPORTAL_PASSWORD
+        sync: false
+      - key: WHATSAPP_AUTH_BASE64
+        sync: false
+      - key: WHATSAPP_TARGET
+        sync: false
+      - key: POLL_INTERVAL_SECONDS
+        value: "30"
+      - key: STARTUP_NOTIFY
+        value: "true"
+      - key: NODE_VERSION
+        value: "22.12.0"
+      - key: NODE_NO_WARNINGS
+        value: "1"
