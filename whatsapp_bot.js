@@ -42,16 +42,19 @@ async function main() {
   ensureAuthDirFromEnv();
 
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
-  if (!state.creds.registered) {
+  const phoneNumber = (process.env.WHATSAPP_PHONE_NUMBER || '').replace(/[^0-9]/g, '');
+
+  if (!state.creds.registered && !phoneNumber) {
     console.error(
-      `No WhatsApp credentials found in ${AUTH_DIR}. Run \`npm run pair\` locally first, ` +
-        `then either commit the auth folder (not recommended) or upload it as WHATSAPP_AUTH_BASE64.`
+      `No WhatsApp credentials found in ${AUTH_DIR} and WHATSAPP_PHONE_NUMBER is not set.\n` +
+        `Set WHATSAPP_PHONE_NUMBER (digits only, with country code, e.g. 923001234567) and redeploy ` +
+        `to trigger in-process pairing on first boot.`
     );
     process.exit(1);
   }
 
   const { version } = await fetchLatestBaileysVersion();
-  log.info({ version }, 'Starting Baileys WhatsApp socket');
+  log.info({ version, authDir: AUTH_DIR, alreadyRegistered: !!state.creds.registered }, 'Starting Baileys WhatsApp socket');
 
   const sock = makeWASocket({
     version,
@@ -62,6 +65,29 @@ async function main() {
   });
 
   sock.ev.on('creds.update', saveCreds);
+
+  if (!state.creds.registered) {
+    setTimeout(async () => {
+      try {
+        const code = await sock.requestPairingCode(phoneNumber);
+        const pretty = code.match(/.{1,4}/g).join('-');
+        const banner =
+          '\n' +
+          '======================================================\n' +
+          '  WhatsApp pairing code:  ' + pretty + '\n' +
+          '======================================================\n' +
+          '  Open WhatsApp on your phone (' + phoneNumber + ')\n' +
+          '  -> Settings -> Linked Devices -> Link a Device\n' +
+          '  -> tap "Link with phone number instead"\n' +
+          '  -> enter the code above (expires in ~60 seconds).\n' +
+          '======================================================\n';
+        console.log(banner);
+      } catch (err) {
+        log.error({ err }, 'Failed to request pairing code');
+        process.exit(1);
+      }
+    }, 2500);
+  }
 
   const portal = new PortalClient(username, password, log);
   let loopStarted = false;
