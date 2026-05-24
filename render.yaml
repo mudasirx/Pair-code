@@ -1,0 +1,24 @@
+services:
+  - type: worker
+    name: mysmsportal-telegram-bot
+    runtime: python
+    plan: starter
+    region: oregon
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    envVars:
+      - key: MYSMSPORTAL_USERNAME
+        sync: false
+      - key: MYSMSPORTAL_PASSWORD
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: POLL_INTERVAL_SECONDS
+        value: "30"
+      - key: STARTUP_NOTIFY
+        value: "true"
+      - key: PYTHON_VERSION
+        value: "3.11.9"
