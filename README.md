@@ -1,25 +1,30 @@
-# WhatsApp Bot Pairing Website
+# Pair-code
 
-A multi-tenant WhatsApp pairing website built on top of
+This repo hosts two independent services that share a `.env` file and a single
+Render blueprint:
+
+1. **WhatsApp pairing website** (`src/`, `public/`) — Node.js + Baileys site
+   that lets each visitor link their own WhatsApp number using a QR scan or an
+   8-digit pair code. Foundation for a future WhatsApp bot.
+2. **mysmsportal → Telegram bot** (`bot.py`) — Python worker that logs into
+   [mysmsportal.com](http://mysmsportal.com), polls the SMS Test Numbers page,
+   and forwards any new test-results rows to a Telegram chat.
+
+The two services are deployed as separate Render services from the same
+`render.yaml` blueprint — one `web` (Node) and one `worker` (Python).
+
+---
+
+## 1. WhatsApp Pairing Website
+
+Multi-tenant pairing site built on top of
 [Baileys](https://github.com/WhiskeySockets/Baileys). Each visitor gets their
 own isolated WhatsApp session and can link their number using **either**:
 
 - **QR code** (Settings → Linked devices → Link a device), or
 - **Pair code** (Settings → Linked devices → Link with phone number instead)
 
-This is the foundation for porting an existing Telegram bot to WhatsApp — the
-linking flow + per-user session management live here. The actual bot logic
-lives in `src/botHandler.js` and is intentionally minimal until the original
-bot code is dropped in and ported.
-
-## Why this exists
-
-The user wanted to convert a Python Telegram bot to a WhatsApp bot. WhatsApp
-doesn't have a "bot token" like Telegram — to act as a user, the bot needs to
-be linked as a companion device on each user's WhatsApp account. This site is
-the linking surface.
-
-## Stack
+### Stack
 
 - **Node.js 20+**, CommonJS
 - **Express** for the HTTP API
@@ -28,7 +33,7 @@ the linking surface.
 - **Server-Sent Events** to push session state to the browser in real time
 - **Multi-file auth state** persisted to disk so sessions survive restarts
 
-## Local development
+### Local development
 
 ```bash
 cp .env.example .env
@@ -50,7 +55,7 @@ When you open the site:
 The session ID is stored in `localStorage` so the same browser keeps reusing
 the same WhatsApp session.
 
-## API
+### API
 
 | Method | Path                         | Description                                  |
 | ------ | ---------------------------- | -------------------------------------------- |
@@ -62,47 +67,87 @@ the same WhatsApp session.
 | POST   | `/api/sessions/:id/pair`     | Request an 8-digit pair code for a number    |
 | POST   | `/api/sessions/:id/logout`   | Log out and wipe the session                 |
 
-## Render deployment
-
-A `render.yaml` blueprint is included:
-
-- Web service on Node, build with `npm install`, start with `npm start`.
-- Health check on `/api/health`.
-- A persistent disk mounted at `/var/data`, with `SESSIONS_DIR=/var/data/sessions`,
-  so per-user WhatsApp auth state survives deploys and restarts.
-
-Push the repo to GitHub, then on Render:
-
-1. **New → Blueprint** and point it at this repo.
-2. Confirm the service and disk shown by Render match `render.yaml`.
-3. Deploy. The site will be live at the URL Render gives you.
-
-## Where the Telegram bot logic goes
+### Where the bot logic goes
 
 `src/botHandler.js` exports `handleIncomingMessage({ sessionId, sock, update })`.
 It is wired into Baileys' `messages.upsert` event for every active session.
+For now it only handles `/ping` and `/start` — drop your own command handlers
+in there.
 
-Porting from Python Telegram bot is mostly mechanical:
+---
 
-- Telegram `@bot.message_handler(commands=['foo'])` → check the message text
-  for `/foo` in `handleIncomingMessage` and call `sock.sendMessage(jid, …)`.
-- External API calls (`requests.get(...)`) → use `fetch` (Node 20 has it
-  built in) and `await` the response inside the handler.
-- Per-user state → key it by the WhatsApp JID (`msg.key.remoteJid`) instead of
-  Telegram `chat.id`.
+## 2. mysmsportal Telegram Bot
 
-Drop the original bot's code into the repo and I'll port it command by command.
+A small Python worker that logs into mysmsportal.com, polls the **SMS Test
+Numbers** page every 30 s, and sends any new rows from the test-results table
+(Date / Termination / DDI / CLI / Status) to a Telegram chat.
+
+### Configuration
+
+Set these environment variables (see [`.env.example`](./.env.example)):
+
+| Variable | Description |
+|---|---|
+| `MYSMSPORTAL_USERNAME` | mysmsportal.com login username |
+| `MYSMSPORTAL_PASSWORD` | mysmsportal.com login password |
+| `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather |
+| `TELEGRAM_CHAT_ID` | Target chat id (user / group / channel) |
+| `POLL_INTERVAL_SECONDS` | Optional, default `30` |
+| `STARTUP_NOTIFY` | Optional, send a "bot started" message on launch (default `true`) |
+
+### Run locally
+
+```bash
+pip install -r requirements.txt
+cp .env.example .env   # then edit values
+set -a && source .env && set +a
+python bot.py
+```
+
+### How it works
+
+On startup the bot logs in, captures the test-results table as the
+"already-seen" baseline (so it does not spam every existing row), and then on
+each poll it compares the current rows against that baseline. New rows are
+sent to Telegram in the order they appeared. If the session expires the client
+transparently logs back in.
+
+---
+
+## Render deployment
+
+[`render.yaml`](./render.yaml) is a Render Blueprint that defines **both**
+services:
+
+- A `web` service `whatsapp-bot-pairing` (Node, with a persistent disk at
+  `/var/data` for `SESSIONS_DIR=/var/data/sessions`).
+- A `worker` service `mysmsportal-telegram-bot` (Python).
+
+Steps:
+
+1. Push this repo to GitHub.
+2. In Render: **New → Blueprint**, point it at this repo.
+3. Render will create both services. On each service's **Environment** tab,
+   fill in the secrets that have `sync: false`
+   (`MYSMSPORTAL_USERNAME`, `MYSMSPORTAL_PASSWORD`, `TELEGRAM_BOT_TOKEN`,
+   `TELEGRAM_CHAT_ID`).
+4. Deploy.
+
+> Background workers on Render require a paid plan. If you need a free
+> alternative for the Python worker, you can run `python bot.py` on any
+> always-on box (a small VPS, a Raspberry Pi, etc.) — it has no other
+> infrastructure requirements.
 
 ## Security notes
 
-- Sessions are stored on disk under `SESSIONS_DIR`. Treat that directory like
-  a credentials store — anyone with access to it can impersonate the linked
-  WhatsApp accounts.
+- Sessions for the WhatsApp pairing site are stored on disk under
+  `SESSIONS_DIR`. Treat that directory like a credentials store — anyone with
+  access to it can impersonate the linked WhatsApp accounts.
 - The `/api/sessions/:id/*` endpoints currently trust the session ID as a
   bearer token (whoever knows it controls that session). Session IDs are
   16 random hex chars (~64 bits of entropy), which is fine for the linking
   flow itself but you may want to add proper auth before exposing this on a
   shared URL.
-- This uses Baileys, which is an **unofficial** WhatsApp Web client. Accounts
-  can be banned by WhatsApp at their discretion. For production / commercial
-  use, the WhatsApp Cloud API is the official path.
+- Baileys is an **unofficial** WhatsApp Web client. Accounts can be banned by
+  WhatsApp at their discretion. For production / commercial use, the WhatsApp
+  Cloud API is the official path.

@@ -1,7 +1,18 @@
+# Node
 node_modules/
-sessions/
+npm-debug.log*
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Local secrets / runtime state
 .env
 .env.local
+sessions/
+
+# Misc
 *.log
 .DS_Store
-npm-debug.log*
