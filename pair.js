@@ -7,6 +7,7 @@ const {
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
   DisconnectReason,
+  Browsers,
 } = require('@whiskeysockets/baileys');
 const { AUTH_DIR } = require('./auth_state');
 
@@ -28,12 +29,15 @@ async function main() {
 
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
   const { version } = await fetchLatestBaileysVersion();
+  console.log('Baileys version:', version);
   const sock = makeWASocket({
     version,
     auth: state,
     printQRInTerminal: false,
-    logger: pino({ level: 'silent' }),
-    browser: ['mysmsportal-bot', 'Chrome', '1.0'],
+    logger: pino({ level: process.env.BAILEYS_LOG_LEVEL || 'warn' }),
+    browser: Browsers.macOS('Safari'),
+    syncFullHistory: false,
+    markOnlineOnConnect: false,
   });
 
   sock.ev.on('creds.update', saveCreds);
@@ -59,21 +63,29 @@ async function main() {
   }
 
   sock.ev.on('connection.update', (update) => {
+    console.log('[connection.update]', JSON.stringify({
+      connection: update.connection,
+      isNewLogin: update.isNewLogin,
+      qr: update.qr ? '<qr>' : undefined,
+      receivedPendingNotifications: update.receivedPendingNotifications,
+      error: update.lastDisconnect?.error?.output?.payload || update.lastDisconnect?.error?.message,
+    }));
     const { connection, lastDisconnect } = update;
     if (connection === 'open') {
       console.log('\nLinked successfully! WhatsApp number:', sock.user?.id);
       console.log('Auth saved in ./' + AUTH_DIR + '/');
       console.log('Run `npm run export-auth` to package it for Render deployment.');
       rl.close();
-      setTimeout(() => process.exit(0), 1500);
+      setTimeout(() => process.exit(0), 3000);
     } else if (connection === 'close') {
       const code = lastDisconnect?.error?.output?.statusCode;
+      console.log('Disconnect status code:', code, 'reason:', DisconnectReason[code]);
       if (code !== DisconnectReason.loggedOut) {
-        console.log('Connection closed, retrying...');
+        console.log('Connection closed, exiting (rerun script to retry).');
       } else {
         console.log('Logged out.');
-        process.exit(1);
       }
+      process.exit(1);
     }
   });
 }

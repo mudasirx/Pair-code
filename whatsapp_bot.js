@@ -6,6 +6,7 @@ const {
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
   DisconnectReason,
+  Browsers,
 } = require('@whiskeysockets/baileys');
 
 const { PortalClient, parseResults, resultKey, formatMessage } = require('./portal');
@@ -61,7 +62,9 @@ async function main() {
     auth: state,
     printQRInTerminal: false,
     logger: pino({ level: 'silent' }),
-    browser: ['mysmsportal-bot', 'Chrome', '1.0'],
+    browser: Browsers.macOS('Safari'),
+    syncFullHistory: false,
+    markOnlineOnConnect: false,
   });
 
   sock.ev.on('creds.update', saveCreds);
