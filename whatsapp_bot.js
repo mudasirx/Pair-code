@@ -1,5 +1,8 @@
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
+const axios = require('axios');
 const pino = require('pino');
 const {
   default: makeWASocket,
@@ -11,6 +14,31 @@ const {
 
 const { PortalClient, parseResults, resultKey, formatMessage } = require('./portal');
 const { AUTH_DIR, ensureAuthDirFromEnv } = require('./auth_state');
+
+async function sendTelegram(text) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!token || !chatId) return false;
+  try {
+    await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
+      chat_id: chatId,
+      text,
+      parse_mode: 'Markdown',
+      disable_web_page_preview: true,
+    }, { timeout: 10000 });
+    return true;
+  } catch (err) {
+    console.error('Telegram relay failed:', err.response?.data || err.message);
+    return false;
+  }
+}
+
+function writeBanner(text) {
+  // multiple writes + flushes so Render's log buffering can't swallow the code
+  for (let i = 0; i < 3; i++) {
+    process.stdout.write(text + '\n');
+  }
+}
 
 const log = pino({ level: process.env.LOG_LEVEL || 'info' });
 
@@ -70,6 +98,12 @@ async function main() {
   sock.ev.on('creds.update', saveCreds);
 
   if (!state.creds.registered) {
+    const tgConfigured = !!(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID);
+    writeBanner(
+      '\n*** PAIRING MODE *** requesting a code in ~3 seconds.\n' +
+        'Code will appear: in these logs' + (tgConfigured ? ', on Telegram' : '') +
+        ', and on disk at ' + path.join(path.dirname(AUTH_DIR), 'PAIRING_CODE.txt') + '\n'
+    );
     setTimeout(async () => {
       try {
         const code = await sock.requestPairingCode(phoneNumber);
@@ -84,7 +118,32 @@ async function main() {
           '  -> tap "Link with phone number instead"\n' +
           '  -> enter the code above (expires in ~60 seconds).\n' +
           '======================================================\n';
-        console.log(banner);
+        writeBanner(banner);
+
+        // Persist the code to disk too, so the user can retrieve it from
+        // Render Shell if log output was missed.
+        try {
+          const codeFile = path.join(path.dirname(AUTH_DIR), 'PAIRING_CODE.txt');
+          fs.writeFileSync(
+            codeFile,
+            `${pretty}\n\ngenerated_at: ${new Date().toISOString()}\nphone: ${phoneNumber}\nvalid_for: ~60 seconds\n`
+          );
+          console.log('Pairing code also written to', codeFile);
+        } catch (err) {
+          console.error('Could not persist pairing code to disk:', err.message);
+        }
+
+        // Best-effort relay to Telegram so the user doesn't have to
+        // hunt through the Render log stream.
+        const tgText =
+          '\uD83D\uDD17 *WhatsApp pairing code*\n\n' +
+          '`' + pretty + '`\n\n' +
+          '_Phone:_ +' + phoneNumber + '\n' +
+          '_Expires in ~60 seconds._\n\n' +
+          'On your phone: WhatsApp \u2192 Settings \u2192 Linked Devices \u2192 ' +
+          'Link a Device \u2192 "Link with phone number instead" \u2192 enter the code.';
+        const sent = await sendTelegram(tgText);
+        if (sent) console.log('Pairing code relayed to Telegram chat', process.env.TELEGRAM_CHAT_ID);
       } catch (err) {
         log.error({ err }, 'Failed to request pairing code');
         process.exit(1);

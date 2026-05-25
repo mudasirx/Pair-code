@@ -58,6 +58,7 @@ restarts and redeploys.
 | `WHATSAPP_TARGET` | Optional. Phone number (digits only) or full JID (`...@s.whatsapp.net` / `...@g.us`) to send messages to. Defaults to the linked account itself. |
 | `AUTH_DIR` | Where Baileys stores credentials. Defaults to `/var/data/auth_info_baileys` on Render (persistent disk). |
 | `WHATSAPP_AUTH_BASE64` | Optional fallback. If set and `AUTH_DIR` is empty, the bot unpacks this base64 payload into `AUTH_DIR` on boot. Useful if you can't use a disk. |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | Optional. If both are set, the pairing code is also relayed to that Telegram chat on first boot — much easier than hunting through Render logs. Reuse the same values as the Telegram worker. |
 | `POLL_INTERVAL_SECONDS` | Optional, default `30` |
 | `STARTUP_NOTIFY` | Optional, send a "bot started" message on launch (default `true`) |
 
@@ -67,18 +68,20 @@ restarts and redeploys.
 2. Create the Render Blueprint (`New → Blueprint`).
 3. On the **`mysmsportal-whatsapp-bot`** service, set the env vars from the
    table above — at minimum `MYSMSPORTAL_USERNAME`, `MYSMSPORTAL_PASSWORD`,
-   and `WHATSAPP_PHONE_NUMBER`.
-4. Deploy. Open the worker's **Logs** tab and wait for a banner like:
-
-   ```
-   ======================================================
-     WhatsApp pairing code:  ABCD-1234
-   ======================================================
-   ```
+   and `WHATSAPP_PHONE_NUMBER`. If you've already got the Telegram bot
+   working, copy `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` here too — the
+   pairing code will then arrive as a Telegram message.
+4. Deploy. The pairing code is broadcast to **three places** so you can pick
+   whichever is easiest:
+   - **Telegram** chat (if `TELEGRAM_BOT_TOKEN`+`TELEGRAM_CHAT_ID` are set).
+   - The worker's **Logs** tab — printed 3× with a `*** PAIRING MODE ***`
+     header so it's hard to miss.
+   - A file at `/var/data/PAIRING_CODE.txt` — view it from the worker's
+     **Shell** tab with `cat /var/data/PAIRING_CODE.txt`.
 5. On your phone: **WhatsApp → Settings → Linked Devices → Link a Device →
-   "Link with phone number instead"** and enter the 8-digit code. Code is
-   valid for ~60 seconds — if it expires just restart the worker to get a
-   fresh one.
+   "Link with phone number instead"** and enter the 8-character code
+   (dashes optional). Code is valid for ~60 seconds — if it expires just
+   restart the worker on Render to get a fresh one.
 6. The bot finishes linking, saves the credentials to `/var/data`, and
    starts polling. From now on every restart reuses the saved auth, so you
    can clear `WHATSAPP_PHONE_NUMBER` if you want (optional).

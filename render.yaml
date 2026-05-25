@@ -46,6 +46,14 @@ services:
         sync: false
       - key: WHATSAPP_AUTH_BASE64
         sync: false
+      # Optional: if both are set, the pairing code is also relayed to the
+      # Telegram chat on first boot. Useful when you'd rather not hunt for
+      # it in the Render log stream. Reuse the same values as the Telegram
+      # worker above.
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
       - key: AUTH_DIR
         value: /var/data/auth_info_baileys
       - key: POLL_INTERVAL_SECONDS
