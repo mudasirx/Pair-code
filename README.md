@@ -6,10 +6,30 @@ the test-results table (Date / Termination / DDI / CLI / Status) to a chat:
 
 - **`bot.py`** — Telegram bot (Python, `requests` + `beautifulsoup4`).
 - **`whatsapp_bot.js`** — WhatsApp bot (Node.js, [Baileys](https://github.com/WhiskeySockets/Baileys)
-  linked via 8-digit pairing code).
+  linked via 8-digit pairing code) with full portal command support.
 
 Both bots are deployed by the included Render Blueprint ([`render.yaml`](./render.yaml))
 as background workers. You can run either one independently.
+
+### WhatsApp Bot Commands
+
+Send any of these commands to the bot via WhatsApp:
+
+| Command | Description |
+|---|---|
+| `/help` | Show all available commands |
+| `/results` | Latest test results (last 10) |
+| `/rates <country>` | Search the international SMS rate card |
+| `/numbers` | Show your allocated numbers |
+| `/clients` | List all sub-accounts |
+| `/payouts` | Current payouts summary (top 30) |
+| `/today` | Today's traffic summary by status and range |
+| `/todaydetail` | Today's detail grouped by range |
+| `/summaries` | Sender summaries for today |
+| `/statements` | Recent payment statements (last 15) |
+| `/pair <phone>` | Pair a new WhatsApp number from chat |
+| `/login <user> <pass>` | Change portal credentials on the fly |
+| `/status` | Bot uptime and poll interval |
 
 ---
 
