@@ -14,6 +14,10 @@ const {
 
 const { PortalClient, parseResults, resultKey, formatMessage } = require('./portal');
 const { AUTH_DIR, ensureAuthDirFromEnv } = require('./auth_state');
+const cmd = require('./commands');
+
+const log = pino({ level: process.env.LOG_LEVEL || 'info' });
+const startTime = Date.now();
 
 async function sendTelegram(text) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -34,13 +38,10 @@ async function sendTelegram(text) {
 }
 
 function writeBanner(text) {
-  // multiple writes + flushes so Render's log buffering can't swallow the code
   for (let i = 0; i < 3; i++) {
     process.stdout.write(text + '\n');
   }
 }
-
-const log = pino({ level: process.env.LOG_LEVEL || 'info' });
 
 function requireEnv(name) {
   const v = process.env[name];
@@ -62,8 +63,8 @@ function normalizeTarget(raw, fallbackJid) {
 }
 
 async function main() {
-  const username = requireEnv('MYSMSPORTAL_USERNAME');
-  const password = requireEnv('MYSMSPORTAL_PASSWORD');
+  let username = requireEnv('MYSMSPORTAL_USERNAME');
+  let password = requireEnv('MYSMSPORTAL_PASSWORD');
   const pollInterval = parseInt(process.env.POLL_INTERVAL_SECONDS || '30', 10) * 1000;
   const startupNotify = (process.env.STARTUP_NOTIFY || 'true').toLowerCase() !== 'false';
   const rawTarget = process.env.WHATSAPP_TARGET;
@@ -120,8 +121,6 @@ async function main() {
           '======================================================\n';
         writeBanner(banner);
 
-        // Persist the code to disk too, so the user can retrieve it from
-        // Render Shell if log output was missed.
         try {
           const codeFile = path.join(path.dirname(AUTH_DIR), 'PAIRING_CODE.txt');
           fs.writeFileSync(
@@ -133,8 +132,6 @@ async function main() {
           console.error('Could not persist pairing code to disk:', err.message);
         }
 
-        // Best-effort relay to Telegram so the user doesn't have to
-        // hunt through the Render log stream.
         const tgText =
           '\uD83D\uDD17 *WhatsApp pairing code*\n\n' +
           '`' + pretty + '`\n\n' +
@@ -151,10 +148,11 @@ async function main() {
     }, 2500);
   }
 
-  const portal = new PortalClient(username, password, log);
+  let portal = new PortalClient(username, password, log);
   let loopStarted = false;
   let seen = new Set();
   let firstPoll = true;
+  let pairInProgress = false;
 
   async function safeSend(jid, text) {
     try {
@@ -162,6 +160,158 @@ async function main() {
     } catch (err) {
       log.error({ err }, 'Failed to send WhatsApp message');
     }
+  }
+
+  async function handleCommand(jid, body) {
+    const text = body.trim();
+    if (!text.startsWith('/')) return false;
+
+    const spaceIdx = text.indexOf(' ');
+    const command = (spaceIdx > -1 ? text.substring(0, spaceIdx) : text).toLowerCase();
+    const args = spaceIdx > -1 ? text.substring(spaceIdx + 1).trim() : '';
+
+    log.info({ command, args }, 'Processing command');
+
+    try {
+      let reply;
+      switch (command) {
+        case '/help':
+          reply = cmd.buildHelp();
+          break;
+        case '/results':
+          reply = await cmd.handleResults(portal);
+          break;
+        case '/rates':
+          reply = await cmd.handleRates(portal, args);
+          break;
+        case '/numbers':
+          reply = await cmd.handleNumbers(portal);
+          break;
+        case '/clients':
+          reply = await cmd.handleClients(portal);
+          break;
+        case '/payouts':
+          reply = await cmd.handlePayouts(portal);
+          break;
+        case '/today':
+          reply = await cmd.handleToday(portal);
+          break;
+        case '/todaydetail':
+          reply = await cmd.handleTodayDetail(portal);
+          break;
+        case '/summaries':
+          reply = await cmd.handleSummaries(portal);
+          break;
+        case '/statements':
+          reply = await cmd.handleStatements(portal);
+          break;
+        case '/status':
+          reply = cmd.handleStatus(startTime, pollInterval);
+          break;
+        case '/login': {
+          const parts = args.split(/\s+/);
+          if (parts.length < 2) {
+            reply = '\u26A0\uFE0F Usage: /login <username> <password>';
+            break;
+          }
+          const newUser = parts[0];
+          const newPass = parts.slice(1).join(' ');
+          const testPortal = new PortalClient(newUser, newPass, log);
+          try {
+            await testPortal.login();
+            username = newUser;
+            password = newPass;
+            portal = new PortalClient(username, password, log);
+            await portal.login();
+            reply = '\u{2705} Login updated successfully! Portal credentials changed.';
+          } catch (loginErr) {
+            reply = `\u274C Login failed with new credentials: ${loginErr.message}\nOld credentials kept.`;
+          }
+          break;
+        }
+        case '/pair': {
+          if (!args) {
+            reply = '\u26A0\uFE0F Usage: /pair <phone_number>\nExample: /pair 923001234567';
+            break;
+          }
+          const newPhone = args.replace(/[^0-9]/g, '');
+          if (newPhone.length < 10) {
+            reply = '\u274C Invalid phone number. Use digits only with country code.';
+            break;
+          }
+          if (pairInProgress) {
+            reply = '\u26A0\uFE0F A pairing is already in progress. Wait for it to finish.';
+            break;
+          }
+          pairInProgress = true;
+          reply = `\u{1F504} Starting pair for +${newPhone}...\nCode will be sent here and to Telegram in ~5 seconds.`;
+          await safeSend(jid, reply);
+
+          try {
+            const { state: newState, saveCreds: newSaveCreds } = await useMultiFileAuthState(
+              path.join(path.dirname(AUTH_DIR), `pair_${newPhone}`)
+            );
+            const { version: newVersion } = await fetchLatestBaileysVersion();
+            const pairSock = makeWASocket({
+              version: newVersion,
+              auth: newState,
+              printQRInTerminal: false,
+              logger: pino({ level: 'silent' }),
+              browser: Browsers.macOS('Safari'),
+              syncFullHistory: false,
+              markOnlineOnConnect: false,
+            });
+            pairSock.ev.on('creds.update', newSaveCreds);
+
+            setTimeout(async () => {
+              try {
+                const code = await pairSock.requestPairingCode(newPhone);
+                const pretty = code.match(/.{1,4}/g).join('-');
+                const pairMsg =
+                  `\u{1F517} *Pairing code for +${newPhone}:*\n\n` +
+                  `\`${pretty}\`\n\n` +
+                  `_Open WhatsApp on that phone \u2192 Settings \u2192 Linked Devices \u2192 ` +
+                  `Link a Device \u2192 "Link with phone number instead" \u2192 enter the code._\n` +
+                  `_Code expires in ~60 seconds._`;
+                await safeSend(jid, pairMsg);
+                await sendTelegram(pairMsg);
+
+                pairSock.ev.on('connection.update', (update) => {
+                  if (update.connection === 'open') {
+                    safeSend(jid, `\u{2705} Successfully paired +${newPhone}!`);
+                    pairInProgress = false;
+                    setTimeout(() => {
+                      try { pairSock.end(); } catch (_) {}
+                    }, 3000);
+                  } else if (update.connection === 'close') {
+                    const statusCode = update.lastDisconnect?.error?.output?.statusCode;
+                    if (statusCode !== DisconnectReason.loggedOut) {
+                      log.warn({ statusCode }, 'Pair socket closed');
+                    }
+                    pairInProgress = false;
+                  }
+                });
+              } catch (pairErr) {
+                await safeSend(jid, `\u274C Pairing failed: ${pairErr.message}`);
+                pairInProgress = false;
+                try { pairSock.end(); } catch (_) {}
+              }
+            }, 3000);
+          } catch (pairSetupErr) {
+            await safeSend(jid, `\u274C Pair setup error: ${pairSetupErr.message}`);
+            pairInProgress = false;
+          }
+          return true;
+        }
+        default:
+          reply = `\u2753 Unknown command: ${command}\nType /help for available commands.`;
+      }
+      if (reply) await safeSend(jid, reply);
+    } catch (err) {
+      log.error({ err, command }, 'Command handler error');
+      await safeSend(jid, `\u274C Error executing ${command}: ${err.message}`);
+    }
+    return true;
   }
 
   async function pollLoop() {
@@ -180,7 +330,7 @@ async function main() {
     if (startupNotify) {
       await safeSend(
         target,
-        `\u{1F916} *mysmsportal bot started*\nPolling every ${pollInterval / 1000}s for new SMS test results.`
+        `\u{1F916} *mysmsportal bot started*\nPolling every ${pollInterval / 1000}s for new SMS test results.\nType /help for commands.`
       );
     }
 
@@ -217,6 +367,30 @@ async function main() {
       await new Promise((res) => setTimeout(res, pollInterval));
     }
   }
+
+  // Listen for incoming messages (commands)
+  sock.ev.on('messages.upsert', async (m) => {
+    if (m.type !== 'notify') return;
+    for (const msg of m.messages) {
+      // Skip messages from self that are status broadcasts
+      if (msg.key.remoteJid === 'status@broadcast') continue;
+
+      // Extract message text from various message types
+      const body =
+        msg.message?.conversation ||
+        msg.message?.extendedTextMessage?.text ||
+        '';
+      if (!body) continue;
+
+      // Only handle commands (messages starting with /)
+      if (!body.startsWith('/')) continue;
+
+      // Determine the JID to reply to
+      const fromJid = msg.key.remoteJid;
+      log.info({ from: fromJid, body }, 'Incoming command');
+      await handleCommand(fromJid, body);
+    }
+  });
 
   sock.ev.on('connection.update', (update) => {
     const { connection, lastDisconnect } = update;
